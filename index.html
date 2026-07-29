@@ -88,9 +88,60 @@
   .seg button{border:none;background:transparent;padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text-muted);font-weight:600;}
   .seg button.active{background:var(--navy);color:#fff;}
   .chart-card{margin-bottom:24px;}
+
+  /* Toast Notification */
+  .toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 350px;
+  }
+  .toast {
+    background: var(--white);
+    border-left: 4px solid var(--green);
+    color: var(--text-dark);
+    padding: 12px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 14px;
+    animation: slideIn 0.3s ease forwards;
+    border: 1px solid var(--border);
+  }
+  .toast.error {
+    border-left-color: var(--coral);
+  }
+  .toast.success {
+    border-left-color: var(--green);
+  }
+  .toast-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0;
+    line-height: 1;
+  }
+  @keyframes slideIn {
+    from { transform: translateX(120%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  @keyframes fadeOut {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(120%); }
+  }
 </style>
 </head>
 <body>
+<div class="toast-container" id="toastContainer"></div>
 <div class="app">
   <div class="sidebar" id="sidebar">
     <div class="sidebar-top">
@@ -114,6 +165,9 @@
     <div class="nav-item" data-page="expenses">
       <span class="nav-icon"><svg viewBox="0 0 24 24"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg></span><span class="nav-label">Expenses</span>
     </div>
+    <div class="nav-item" data-page="debtors">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">Debtors</span>
+    </div>
   </div>
 
   <div class="main" id="main"></div>
@@ -123,11 +177,33 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
+/* ---------- global error handling ---------- */
+window.onerror = function(message, source, lineno, colno, error) {
+  const errMsg = `${message} at ${source}:${lineno}:${colno}`;
+  console.error("Global Error Caught:", errMsg);
+  if (typeof showToast === 'function') {
+    showToast("Application Error: " + errMsg);
+  } else {
+    alert("Application Error: " + errMsg);
+  }
+  return false;
+};
+window.onunhandledrejection = function(event) {
+  const errMsg = event.reason && event.reason.message ? event.reason.message : JSON.stringify(event.reason);
+  console.error("Global Unhandled Promise Rejection:", errMsg);
+  if (typeof showToast === 'function') {
+    showToast("Database/Promise Error: " + errMsg);
+  } else {
+    alert("Database/Promise Error: " + errMsg);
+  }
+};
+
 /* ---------- state ---------- */
 let rental = [];    // { id, property, month, amount, date, notes }
 let matooke = [];   // { id, date, qty, price, notes }
 let coffee = [];    // { id, date, qty, price, notes }
 let expenses = [];  // { id, date, category, amount, notes }
+let debtors = [];   // { id, name, amount, date, notes, paid }
 
 let currentPage = 'overview';
 let chartView = 'monthly';
@@ -135,12 +211,33 @@ let rentalView = 'all';
 let matookeView = 'all';
 let coffeeView = 'all';
 let expensesView = 'all';
+let debtorsView = 'all';
 let overviewChart = null;
 
 /* ---------- helpers ---------- */
 function fmt(n){
   n = Math.round(n || 0);
   return 'UGX ' + n.toLocaleString('en-US');
+}
+
+function showToast(message, type = 'error') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <span>${message}</span>
+    <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.style.animation = 'fadeOut 0.3s ease forwards';
+      toast.addEventListener('animationend', () => {
+        toast.remove();
+      });
+    }
+  }, 4000);
 }
 
 function weekInfo(dateStr){
@@ -191,6 +288,7 @@ async function loadData(){
     rental = data || [];
   } catch(e) {
     console.error('Could not load rentals', e);
+    showToast('Could not load rentals: ' + e.message);
     rental = [];
   }
   try {
@@ -199,6 +297,7 @@ async function loadData(){
     matooke = data || [];
   } catch(e) {
     console.error('Could not load matooke sales', e);
+    showToast('Could not load matooke sales: ' + e.message);
     matooke = [];
   }
   try {
@@ -207,6 +306,7 @@ async function loadData(){
     coffee = data || [];
   } catch(e) {
     console.error('Could not load coffee sales', e);
+    showToast('Could not load coffee sales: ' + e.message);
     coffee = [];
   }
   try {
@@ -215,7 +315,17 @@ async function loadData(){
     expenses = data || [];
   } catch(e) {
     console.error('Could not load expenses', e);
+    showToast('Could not load expenses: ' + e.message);
     expenses = [];
+  }
+  try {
+    const { data, error } = await supabaseClient.from('debtors').select('*');
+    if (error) throw error;
+    debtors = data || [];
+  } catch(e) {
+    console.error('Could not load debtors', e);
+    showToast('Could not load debtors: ' + e.message);
+    debtors = [];
   }
   render();
 }
@@ -232,20 +342,44 @@ async function addRental(e){
     if (error) throw error;
     if (data && data[0]) {
       rental.push(data[0]);
+      showToast('Rental payment saved successfully!', 'success');
     }
   } catch(err) {
     console.error('Could not save rental payment', err);
+    showToast('Could not save rental payment: ' + err.message);
   }
   render();
 }
 async function deleteRental(id){
+  const oldRental = [...rental];
+  rental = rental.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('rental').delete().eq('id', id);
     if (error) throw error;
-    rental = rental.filter(r => r.id !== id);
+    showToast('Rental payment removed.', 'success');
   } catch(e) {
     console.error('Could not delete rental payment', e);
-    alert('Could not remove this entry — please check your connection and try again.');
+    showToast('Could not delete rental payment: ' + e.message);
+    rental = oldRental; // rollback
+  }
+  render();
+}
+async function markRentalPaid(id){
+  const item = rental.find(r => String(r.id) === String(id));
+  if (!item) {
+    showToast(`Error: Rental item not found for ID ${id}`, 'error');
+    return;
+  }
+  const oldAmount = item.amount;
+  item.amount = item.due;
+  try {
+    const { error } = await supabaseClient.from('rental').update({ amount: item.due }).eq('id', id);
+    if (error) throw error;
+    showToast('Rental payment marked as paid up!', 'success');
+  } catch(e) {
+    console.error('Could not mark rental as paid', e);
+    showToast('Could not update payment: ' + e.message);
+    item.amount = oldAmount; // rollback
   }
   render();
 }
@@ -260,20 +394,25 @@ async function addMatooke(e){
     if (error) throw error;
     if (data && data[0]) {
       matooke.push(data[0]);
+      showToast('Matooke sale saved!', 'success');
     }
   } catch(err) {
     console.error('Could not save matooke sale', err);
+    showToast('Could not save matooke sale: ' + err.message);
   }
   render();
 }
 async function deleteMatooke(id){
+  const oldMatooke = [...matooke];
+  matooke = matooke.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('matooke').delete().eq('id', id);
     if (error) throw error;
-    matooke = matooke.filter(r => r.id !== id);
+    showToast('Matooke sale removed.', 'success');
   } catch(e) {
     console.error('Could not delete matooke sale', e);
-    alert('Could not remove this entry — please check your connection and try again.');
+    showToast('Could not delete matooke sale: ' + e.message);
+    matooke = oldMatooke; // rollback
   }
   render();
 }
@@ -288,20 +427,25 @@ async function addCoffee(e){
     if (error) throw error;
     if (data && data[0]) {
       coffee.push(data[0]);
+      showToast('Coffee sale saved!', 'success');
     }
   } catch(err) {
     console.error('Could not save coffee sale', err);
+    showToast('Could not save coffee sale: ' + err.message);
   }
   render();
 }
 async function deleteCoffee(id){
+  const oldCoffee = [...coffee];
+  coffee = coffee.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('coffee').delete().eq('id', id);
     if (error) throw error;
-    coffee = coffee.filter(r => r.id !== id);
+    showToast('Coffee sale removed.', 'success');
   } catch(e) {
     console.error('Could not delete coffee sale', e);
-    alert('Could not remove this entry — please check your connection and try again.');
+    showToast('Could not delete coffee sale: ' + e.message);
+    coffee = oldCoffee; // rollback
   }
   render();
 }
@@ -316,20 +460,78 @@ async function addExpense(e){
     if (error) throw error;
     if (data && data[0]) {
       expenses.push(data[0]);
+      showToast('Expense saved!', 'success');
     }
   } catch(err) {
     console.error('Could not save expense', err);
+    showToast('Could not save expense: ' + err.message);
   }
   render();
 }
 async function deleteExpense(id){
+  const oldExpenses = [...expenses];
+  expenses = expenses.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('expenses').delete().eq('id', id);
     if (error) throw error;
-    expenses = expenses.filter(r => r.id !== id);
+    showToast('Expense removed.', 'success');
   } catch(e) {
     console.error('Could not delete expense', e);
-    alert('Could not remove this entry — please check your connection and try again.');
+    showToast('Could not delete expense: ' + e.message);
+    expenses = oldExpenses; // rollback
+  }
+  render();
+}
+async function addDebtor(e){
+  try {
+    const { data, error } = await supabaseClient.from('debtors').insert({
+      date: e.date,
+      name: e.name,
+      amount: e.amount,
+      notes: e.notes,
+      status: e.status || 'owing'
+    }).select();
+    if (error) throw error;
+    if (data && data[0]) {
+      debtors.push(data[0]);
+      showToast('Debtor saved successfully!', 'success');
+    }
+  } catch(err) {
+    console.error('Could not save debtor', err);
+    showToast('Could not save debtor: ' + err.message);
+  }
+  render();
+}
+async function deleteDebtor(id){
+  const oldDebtors = [...debtors];
+  debtors = debtors.filter(r => String(r.id) !== String(id));
+  try {
+    const { error } = await supabaseClient.from('debtors').delete().eq('id', id);
+    if (error) throw error;
+    showToast('Debtor removed.', 'success');
+  } catch(e) {
+    console.error('Could not delete debtor', e);
+    showToast('Could not delete debtor: ' + e.message);
+    debtors = oldDebtors; // rollback
+  }
+  render();
+}
+async function markDebtorPaid(id){
+  const item = debtors.find(r => String(r.id) === String(id));
+  if (!item) {
+    showToast(`Error: Debtor not found for ID ${id}`, 'error');
+    return;
+  }
+  const oldStatus = item.status;
+  item.status = 'paid';
+  try {
+    const { error } = await supabaseClient.from('debtors').update({ status: 'paid' }).eq('id', id);
+    if (error) throw error;
+    showToast('Debtor marked as paid up!', 'success');
+  } catch(e) {
+    console.error('Could not mark debtor as paid', e);
+    showToast('Could not update debtor: ' + e.message);
+    item.status = oldStatus; // rollback
   }
   render();
 }
@@ -354,6 +556,7 @@ function render(){
   if(currentPage === 'matooke') return renderCrop(main, 'matooke');
   if(currentPage === 'coffee') return renderCrop(main, 'coffee');
   if(currentPage === 'expenses') return renderExpenses(main);
+  if(currentPage === 'debtors') return renderDebtors(main);
 }
 
 /* ---------- totals ---------- */
@@ -394,19 +597,21 @@ function cropRows(kind){
   return list.map(r => ({ Date: r.date, Quantity: r.qty, 'Price per unit': r.price, Total: r.qty * r.price, Notes: r.notes || '' }));
 }
 function expenseRows(){ return expenses.map(r => ({ Date: r.date, Category: r.category, Amount: r.amount, Notes: r.notes || '' })); }
+function debtorsRows(){ return debtors.map(r => ({ Date: r.date, Name: r.name, Amount: r.amount, Status: r.paid ? 'Paid' : 'Owing', Notes: r.notes || '' })); }
 
 function exportCSV(kind){
-  const rows = kind === 'rental' ? rentalRows() : kind === 'expenses' ? expenseRows() : cropRows(kind);
+  const rows = kind === 'rental' ? rentalRows() : kind === 'expenses' ? expenseRows() : kind === 'debtors' ? debtorsRows() : cropRows(kind);
   if(rows.length === 0){ alert('Nothing to export yet.'); return; }
   downloadBlob(toCSV(rows), 'farm-' + kind + '.csv', 'text/csv');
 }
 function exportExcelAll(){
-  if(rental.length===0 && matooke.length===0 && coffee.length===0 && expenses.length===0){ alert('Nothing to export yet.'); return; }
+  if(rental.length===0 && matooke.length===0 && coffee.length===0 && expenses.length===0 && debtors.length===0){ alert('Nothing to export yet.'); return; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rentalRows()), 'Rental');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cropRows('matooke')), 'Matooke');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cropRows('coffee')), 'Coffee');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expenseRows()), 'Expenses');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(debtorsRows()), 'Debtors');
   XLSX.writeFile(wb, 'farm-rental-tracker.xlsx');
 }
 
@@ -556,22 +761,6 @@ function updateRentalStats(){
   if(balEl) balEl.textContent = fmt(totalDue - totalPaid);
 }
 function setRentalView(v){ rentalView = v; render(); }
-async function markRentalPaidUp(id){
-  const r = rental.find(x => x.id === id);
-  if (!r) return;
-  const previousAmount = r.amount;
-  r.amount = r.due; // update locally right away so the screen responds
-  render();
-  try {
-    const { error } = await supabaseClient.from('rental').update({ amount: r.due }).eq('id', id);
-    if (error) throw error;
-  } catch(e) {
-    console.error('Could not mark rental as paid up', e);
-    r.amount = previousAmount; // revert since it didn't actually save
-    alert('Could not save this — please check your connection and try again.');
-    render();
-  }
-}
 function renderRentalTable(){
   const rowFn = r => {
     const balance = r.due - r.amount;
@@ -581,7 +770,7 @@ function renderRentalTable(){
       <td class="num">${fmt(r.amount)}</td>
       <td class="num" style="color:${balance>0?'var(--coral)':'var(--green)'};">${balance>0?fmt(balance):'Paid up'}</td>
       <td>
-        ${balance>0 ? `<button class="btn-outline" data-action="mark-rental-paid" data-id="${r.id}" style="margin-right:6px;">Paid up</button>` : ''}
+        ${balance > 0 ? `<button class="btn" style="background:var(--green); padding:6px 12px; font-size:13px; margin-right:6px;" data-action="mark-rental-paid" data-id="${r.id}">Mark Paid</button>` : ''}
         <button class="btn-danger" data-action="delete-rental" data-id="${r.id}">Remove</button>
       </td>
     </tr>`;
@@ -647,7 +836,7 @@ function renderCropTable(kind, view, unitLabel){
     <td class="num">${fmt(r.price)}</td>
     <td class="num">${fmt(r.qty*r.price)}</td>
     <td>${r.notes || ''}</td>
-    <td><button class="btn-danger" data-action="delete-crop" data-kind="${kind}" data-id="${r.id}">Remove</button></td>
+    <td><button class="btn-danger" data-action="delete-${kind}" data-id="${r.id}">Remove</button></td>
   </tr>`;
   const body = groupRows(list.slice().reverse(), view, r => r.date, rowFn, 6);
   return `<table><thead><tr><th>Date</th><th class="num">Qty</th><th class="num">Price/unit</th><th class="num">Total</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
@@ -706,18 +895,132 @@ function renderExpensesTable(){
   return `<table><thead><tr><th>Date</th><th>Category</th><th class="num">Amount</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
-/* ---------- delegated click handling for Remove / Paid up buttons ---------- */
-document.addEventListener('click', function(e){
-  const btn = e.target.closest('[data-action]');
-  if(!btn) return;
-  const action = btn.dataset.action;
-  if(action === 'delete-rental') deleteRental(btn.dataset.id);
-  else if(action === 'mark-rental-paid') markRentalPaidUp(btn.dataset.id);
-  else if(action === 'delete-crop') { btn.dataset.kind === 'matooke' ? deleteMatooke(btn.dataset.id) : deleteCoffee(btn.dataset.id); }
-  else if(action === 'delete-expense') deleteExpense(btn.dataset.id);
-});
+function renderDebtors(main){
+  const totalOwed = debtors.reduce((t, r) => t + (r.status === 'owing' ? r.amount : 0), 0);
+  
+  main.innerHTML = `
+    <div class="toolbar">
+      <div>
+        <p class="page-title">Debtors</p>
+        <p class="page-sub" style="margin:0;">People who owe the business money for items taken on credit.</p>
+      </div>
+      <button class="btn-outline" onclick="exportCSV('debtors')"><span>&#8595;</span> Export CSV</button>
+    </div>
+    
+    <div class="card" style="margin-bottom:24px;">
+      <div class="form-grid">
+        <div><label for="d-name">Person's name</label><input type="text" id="d-name" placeholder="e.g. Moses K."></div>
+        <div><label for="d-amount">Amount owed</label><input type="number" id="d-amount" min="0" placeholder="0"></div>
+        <div><label for="d-date">Date</label><input type="date" id="d-date"></div>
+        <div><label for="d-notes">Notes (optional)</label><input type="text" id="d-notes" placeholder="e.g. took a suit on credit"></div>
+      </div>
+      <button class="btn" id="addDebtorBtn">Save debtor</button>
+    </div>
+    
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+      <span style="font-size:14px; color:var(--text-muted); font-weight:600;">Total currently owed</span>
+      <span class="pill pill-coral" style="font-size:14px; padding:4px 12px; font-weight:700;" id="d-stat-total">${fmt(totalOwed)}</span>
+    </div>
+    
+    <div class="card">
+      <div class="toolbar" style="margin-bottom:0;">
+        <p class="stat-label" style="margin:0;">All debtors</p>
+        <div class="seg">
+          <button class="${debtorsView==='owing'?'active':''}" onclick="setDebtorsView('owing')">Owing</button>
+          <button class="${debtorsView==='paid'?'active':''}" onclick="setDebtorsView('paid')">Paid</button>
+          <button class="${debtorsView==='all'?'active':''}" onclick="setDebtorsView('all')">All</button>
+        </div>
+      </div>
+      ${debtors.length === 0 ? '<div class="empty">Nothing here yet.</div>' : renderDebtorsTable()}
+    </div>
+  `;
+  
+  document.getElementById('d-date').value = new Date().toISOString().slice(0, 10);
+  
+  document.getElementById('addDebtorBtn').addEventListener('click', () => {
+    const date = document.getElementById('d-date').value || new Date().toISOString().slice(0, 10);
+    const name = document.getElementById('d-name').value.trim();
+    const amount = parseFloat(document.getElementById('d-amount').value) || 0;
+    const notes = document.getElementById('d-notes').value.trim();
+    if(!name || amount <= 0){ alert('Please enter a name and amount above 0.'); return; }
+    addDebtor({ date, name, amount, notes, status: 'owing' });
+  });
+}
+
+function setDebtorsView(v){ debtorsView = v; render(); }
+
+function renderDebtorsTable(){
+  const filtered = debtors.filter(r => {
+    if (debtorsView === 'owing') return r.status === 'owing';
+    if (debtorsView === 'paid') return r.status === 'paid';
+    return true;
+  });
+  
+  if (filtered.length === 0) {
+    return '<div class="empty">Nothing here yet.</div>';
+  }
+  
+  const rowFn = r => {
+    const isPaid = r.status === 'paid';
+    return `<tr>
+      <td>${r.date}</td>
+      <td>${r.name}</td>
+      <td class="num">${fmt(r.amount)}</td>
+      <td>
+        <span class="pill ${isPaid ? 'pill-green' : 'pill-coral'}">
+          ${isPaid ? 'Paid' : 'Owing'}
+        </span>
+      </td>
+      <td>${r.notes || ''}</td>
+      <td>
+        ${!isPaid ? `<button class="btn" style="background:var(--green); padding:6px 12px; font-size:13px; margin-right:6px;" data-action="mark-debtor-paid" data-id="${r.id}">Paid up</button>` : ''}
+        <button class="btn-danger" data-action="delete-debtor" data-id="${r.id}">Remove</button>
+      </td>
+    </tr>`;
+  };
+  
+  const rowsHtml = filtered.slice().reverse().map(rowFn).join('');
+  return `<table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Name</th>
+        <th class="num">Amount</th>
+        <th>Status</th>
+        <th>Notes</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>`;
+}
 
 loadData();
+document.addEventListener('click', (event) => {
+  const btn = event.target.closest('[data-action]');
+  if (!btn) return;
+  
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  
+  if (action === 'mark-rental-paid') {
+    markRentalPaid(id);
+  } else if (action === 'delete-rental') {
+    deleteRental(id);
+  } else if (action === 'delete-matooke') {
+    deleteMatooke(id);
+  } else if (action === 'delete-coffee') {
+    deleteCoffee(id);
+  } else if (action === 'delete-expense') {
+    deleteExpense(id);
+  } else if (action === 'mark-debtor-paid') {
+    markDebtorPaid(id);
+  } else if (action === 'delete-debtor') {
+    deleteDebtor(id);
+  }
+});
 </script>
 </body>
 </html>
