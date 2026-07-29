@@ -581,8 +581,8 @@ function renderRentalTable(){
       <td class="num">${fmt(r.amount)}</td>
       <td class="num" style="color:${balance>0?'var(--coral)':'var(--green)'};">${balance>0?fmt(balance):'Paid up'}</td>
       <td>
-        ${balance>0 ? `<button class="btn-outline" onclick="markRentalPaidUp('${r.id}')" style="margin-right:6px;">Paid up</button>` : ''}
-        <button class="btn-danger" onclick="deleteRental('${r.id}')">Remove</button>
+        ${balance>0 ? `<button class="btn-outline" data-action="mark-rental-paid" data-id="${r.id}" style="margin-right:6px;">Paid up</button>` : ''}
+        <button class="btn-danger" data-action="delete-rental" data-id="${r.id}">Remove</button>
       </td>
     </tr>`;
   };
@@ -647,7 +647,7 @@ function renderCropTable(kind, view, unitLabel){
     <td class="num">${fmt(r.price)}</td>
     <td class="num">${fmt(r.qty*r.price)}</td>
     <td>${r.notes || ''}</td>
-    <td><button class="btn-danger" onclick="${deleteFn}('${r.id}')">Remove</button></td>
+    <td><button class="btn-danger" data-action="delete-crop" data-kind="${kind}" data-id="${r.id}">Remove</button></td>
   </tr>`;
   const body = groupRows(list.slice().reverse(), view, r => r.date, rowFn, 6);
   return `<table><thead><tr><th>Date</th><th class="num">Qty</th><th class="num">Price/unit</th><th class="num">Total</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
@@ -700,11 +700,22 @@ function renderExpensesTable(){
     <td>${r.date}</td><td>${r.category}</td>
     <td class="num" style="color:var(--coral);">${fmt(r.amount)}</td>
     <td>${r.notes || ''}</td>
-    <td><button class="btn-danger" onclick="deleteExpense('${r.id}')">Remove</button></td>
+    <td><button class="btn-danger" data-action="delete-expense" data-id="${r.id}">Remove</button></td>
   </tr>`;
   const body = groupRows(expenses.slice().reverse(), expensesView, r => r.date, rowFn, 5);
   return `<table><thead><tr><th>Date</th><th>Category</th><th class="num">Amount</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
 }
+
+/* ---------- delegated click handling for Remove / Paid up buttons ---------- */
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('[data-action]');
+  if(!btn) return;
+  const action = btn.dataset.action;
+  if(action === 'delete-rental') deleteRental(btn.dataset.id);
+  else if(action === 'mark-rental-paid') markRentalPaidUp(btn.dataset.id);
+  else if(action === 'delete-crop') { btn.dataset.kind === 'matooke' ? deleteMatooke(btn.dataset.id) : deleteCoffee(btn.dataset.id); }
+  else if(action === 'delete-expense') deleteExpense(btn.dataset.id);
+});
 
 loadData();
 </script>
