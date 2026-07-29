@@ -239,12 +239,13 @@ async function addRental(e){
   render();
 }
 async function deleteRental(id){
-  rental = rental.filter(r => r.id !== id);
   try {
     const { error } = await supabaseClient.from('rental').delete().eq('id', id);
     if (error) throw error;
+    rental = rental.filter(r => r.id !== id);
   } catch(e) {
     console.error('Could not delete rental payment', e);
+    alert('Could not remove this entry — please check your connection and try again.');
   }
   render();
 }
@@ -266,12 +267,13 @@ async function addMatooke(e){
   render();
 }
 async function deleteMatooke(id){
-  matooke = matooke.filter(r => r.id !== id);
   try {
     const { error } = await supabaseClient.from('matooke').delete().eq('id', id);
     if (error) throw error;
+    matooke = matooke.filter(r => r.id !== id);
   } catch(e) {
     console.error('Could not delete matooke sale', e);
+    alert('Could not remove this entry — please check your connection and try again.');
   }
   render();
 }
@@ -293,12 +295,13 @@ async function addCoffee(e){
   render();
 }
 async function deleteCoffee(id){
-  coffee = coffee.filter(r => r.id !== id);
   try {
     const { error } = await supabaseClient.from('coffee').delete().eq('id', id);
     if (error) throw error;
+    coffee = coffee.filter(r => r.id !== id);
   } catch(e) {
     console.error('Could not delete coffee sale', e);
+    alert('Could not remove this entry — please check your connection and try again.');
   }
   render();
 }
@@ -320,12 +323,13 @@ async function addExpense(e){
   render();
 }
 async function deleteExpense(id){
-  expenses = expenses.filter(r => r.id !== id);
   try {
     const { error } = await supabaseClient.from('expenses').delete().eq('id', id);
     if (error) throw error;
+    expenses = expenses.filter(r => r.id !== id);
   } catch(e) {
     console.error('Could not delete expense', e);
+    alert('Could not remove this entry — please check your connection and try again.');
   }
   render();
 }
@@ -552,6 +556,22 @@ function updateRentalStats(){
   if(balEl) balEl.textContent = fmt(totalDue - totalPaid);
 }
 function setRentalView(v){ rentalView = v; render(); }
+async function markRentalPaidUp(id){
+  const r = rental.find(x => x.id === id);
+  if (!r) return;
+  const previousAmount = r.amount;
+  r.amount = r.due; // update locally right away so the screen responds
+  render();
+  try {
+    const { error } = await supabaseClient.from('rental').update({ amount: r.due }).eq('id', id);
+    if (error) throw error;
+  } catch(e) {
+    console.error('Could not mark rental as paid up', e);
+    r.amount = previousAmount; // revert since it didn't actually save
+    alert('Could not save this — please check your connection and try again.');
+    render();
+  }
+}
 function renderRentalTable(){
   const rowFn = r => {
     const balance = r.due - r.amount;
@@ -560,7 +580,10 @@ function renderRentalTable(){
       <td class="num">${fmt(r.due)}</td>
       <td class="num">${fmt(r.amount)}</td>
       <td class="num" style="color:${balance>0?'var(--coral)':'var(--green)'};">${balance>0?fmt(balance):'Paid up'}</td>
-      <td><button class="btn-danger" onclick="deleteRental('${r.id}')">Remove</button></td>
+      <td>
+        ${balance>0 ? `<button class="btn-outline" onclick="markRentalPaidUp('${r.id}')" style="margin-right:6px;">Paid up</button>` : ''}
+        <button class="btn-danger" onclick="deleteRental('${r.id}')">Remove</button>
+      </td>
     </tr>`;
   };
   const body = groupRows(rental.slice().reverse(), rentalView, r => r.date, rowFn, 7);
