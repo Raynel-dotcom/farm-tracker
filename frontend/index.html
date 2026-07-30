@@ -312,7 +312,9 @@ async function loadData(){
   try {
     const { data, error } = await supabaseClient.from('expenses').select('*');
     if (error) throw error;
-    expenses = data || [];
+    expenses = data ? data
+      .filter(e => e.category && e.category.startsWith('farm_'))
+      .map(e => ({ ...e, category: e.category.substring(5) })) : [];
   } catch(e) {
     console.error('Could not load expenses', e);
     showToast('Could not load expenses: ' + e.message);
@@ -321,7 +323,9 @@ async function loadData(){
   try {
     const { data, error } = await supabaseClient.from('debtors').select('*');
     if (error) throw error;
-    debtors = data || [];
+    debtors = data ? data
+      .filter(d => d.notes && d.notes.startsWith('farm:'))
+      .map(d => ({ ...d, notes: d.notes.substring(5) })) : [];
   } catch(e) {
     console.error('Could not load debtors', e);
     showToast('Could not load debtors: ' + e.message);
@@ -453,13 +457,14 @@ async function addExpense(e){
   try {
     const { data, error } = await supabaseClient.from('expenses').insert({
       date: e.date,
-      category: e.category,
+      category: 'farm_' + e.category,
       amount: e.amount,
       notes: e.notes
     }).select();
     if (error) throw error;
     if (data && data[0]) {
-      expenses.push(data[0]);
+      const added = { ...data[0], category: data[0].category.substring(5) };
+      expenses.push(added);
       showToast('Expense saved!', 'success');
     }
   } catch(err) {
@@ -488,12 +493,13 @@ async function addDebtor(e){
       date: e.date,
       name: e.name,
       amount: e.amount,
-      notes: e.notes,
+      notes: 'farm:' + (e.notes || ''),
       status: e.status || 'owing'
     }).select();
     if (error) throw error;
     if (data && data[0]) {
-      debtors.push(data[0]);
+      const added = { ...data[0], notes: data[0].notes.substring(5) };
+      debtors.push(added);
       showToast('Debtor saved successfully!', 'success');
     }
   } catch(err) {
