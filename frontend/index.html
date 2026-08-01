@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Farm &amp; Rental Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1F3D2B">
 <style>
   :root{
     --navy:#1F3D2B;
@@ -138,6 +140,26 @@
     from { opacity: 1; transform: translateX(0); }
     to { opacity: 0; transform: translateX(120%); }
   }
+
+  /* Offline Banner */
+  .offline-banner {
+    background: var(--coral);
+    color: #fff;
+    text-align: center;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    animation: slideDown 0.3s ease-out;
+  }
+  @keyframes slideDown {
+    from { transform: translateY(-100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
 </style>
 </head>
 <body>
@@ -170,13 +192,65 @@
     </div>
   </div>
 
-  <div class="main" id="main"></div>
+  <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+    <div class="offline-banner" id="offlineBanner" style="display: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.5"/><path d="M5 12.5a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+      <span>Offline Mode — showing last loaded data (View-Only)</span>
+    </div>
+    <div class="main" id="main"></div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
+/* ---------- service worker registration ---------- */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('Service Worker registered successfully:', reg.scope))
+      .catch(err => console.error('Service Worker registration failed:', err));
+  });
+}
+
+/* ---------- local state cache helpers ---------- */
+function saveLocalState(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving local state', e);
+  }
+}
+function getLocalState(key) {
+  try {
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : [];
+  } catch (e) {
+    console.error('Error reading local state', e);
+    return [];
+  }
+}
+
+/* ---------- online / offline connectivity check ---------- */
+function checkOnline(actionName = "save this entry") {
+  if (!navigator.onLine) {
+    showToast(`No internet connection — please connect to ${actionName}`, 'error');
+    return false;
+  }
+  return true;
+}
+
+function updateOnlineStatus() {
+  const banner = document.getElementById('offlineBanner');
+  if (banner) {
+    banner.style.display = navigator.onLine ? 'none' : 'flex';
+  }
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+window.addEventListener('DOMContentLoaded', updateOnlineStatus);
+
 /* ---------- global error handling ---------- */
 window.onerror = function(message, source, lineno, colno, error) {
   const errMsg = `${message} at ${source}:${lineno}:${colno}`;
@@ -286,28 +360,37 @@ async function loadData(){
     const { data, error } = await supabaseClient.from('rental').select('*');
     if (error) throw error;
     rental = data || [];
+    saveLocalState('farm_rental', rental);
   } catch(e) {
-    console.error('Could not load rentals', e);
-    showToast('Could not load rentals: ' + e.message);
-    rental = [];
+    console.error('Could not load rentals, attempting local cache', e);
+    rental = getLocalState('farm_rental');
+    if (navigator.onLine) {
+      showToast('Could not load rentals: ' + e.message);
+    }
   }
   try {
     const { data, error } = await supabaseClient.from('matooke').select('*');
     if (error) throw error;
     matooke = data || [];
+    saveLocalState('farm_matooke', matooke);
   } catch(e) {
-    console.error('Could not load matooke sales', e);
-    showToast('Could not load matooke sales: ' + e.message);
-    matooke = [];
+    console.error('Could not load matooke, attempting local cache', e);
+    matooke = getLocalState('farm_matooke');
+    if (navigator.onLine) {
+      showToast('Could not load matooke sales: ' + e.message);
+    }
   }
   try {
     const { data, error } = await supabaseClient.from('coffee').select('*');
     if (error) throw error;
     coffee = data || [];
+    saveLocalState('farm_coffee', coffee);
   } catch(e) {
-    console.error('Could not load coffee sales', e);
-    showToast('Could not load coffee sales: ' + e.message);
-    coffee = [];
+    console.error('Could not load coffee, attempting local cache', e);
+    coffee = getLocalState('farm_coffee');
+    if (navigator.onLine) {
+      showToast('Could not load coffee sales: ' + e.message);
+    }
   }
   try {
     const { data, error } = await supabaseClient.from('expenses').select('*');
@@ -315,10 +398,13 @@ async function loadData(){
     expenses = data ? data
       .filter(e => e.category && e.category.startsWith('farm_'))
       .map(e => ({ ...e, category: e.category.substring(5) })) : [];
+    saveLocalState('farm_expenses', expenses);
   } catch(e) {
-    console.error('Could not load expenses', e);
-    showToast('Could not load expenses: ' + e.message);
-    expenses = [];
+    console.error('Could not load expenses, attempting local cache', e);
+    expenses = getLocalState('farm_expenses');
+    if (navigator.onLine) {
+      showToast('Could not load expenses: ' + e.message);
+    }
   }
   try {
     const { data, error } = await supabaseClient.from('debtors').select('*');
@@ -326,15 +412,19 @@ async function loadData(){
     debtors = data ? data
       .filter(d => d.notes && d.notes.startsWith('farm:'))
       .map(d => ({ ...d, notes: d.notes.substring(5) })) : [];
+    saveLocalState('farm_debtors', debtors);
   } catch(e) {
-    console.error('Could not load debtors', e);
-    showToast('Could not load debtors: ' + e.message);
-    debtors = [];
+    console.error('Could not load debtors, attempting local cache', e);
+    debtors = getLocalState('farm_debtors');
+    if (navigator.onLine) {
+      showToast('Could not load debtors: ' + e.message);
+    }
   }
   render();
 }
 
 async function addRental(e){
+  if (!checkOnline("save this entry")) return;
   try {
     const { data, error } = await supabaseClient.from('rental').insert({
       date: e.date,
@@ -346,29 +436,41 @@ async function addRental(e){
     if (error) throw error;
     if (data && data[0]) {
       rental.push(data[0]);
+      saveLocalState('farm_rental', rental);
       showToast('Rental payment saved successfully!', 'success');
     }
   } catch(err) {
     console.error('Could not save rental payment', err);
-    showToast('Could not save rental payment: ' + err.message);
+    if (!navigator.onLine || err.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to save this entry');
+    } else {
+      showToast('Could not save rental payment: ' + err.message);
+    }
   }
   render();
 }
 async function deleteRental(id){
+  if (!checkOnline("remove this entry")) return;
   const oldRental = [...rental];
   rental = rental.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('rental').delete().eq('id', id);
     if (error) throw error;
+    saveLocalState('farm_rental', rental);
     showToast('Rental payment removed.', 'success');
   } catch(e) {
     console.error('Could not delete rental payment', e);
-    showToast('Could not delete rental payment: ' + e.message);
     rental = oldRental; // rollback
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to remove this entry');
+    } else {
+      showToast('Could not delete rental payment: ' + e.message);
+    }
   }
   render();
 }
 async function markRentalPaid(id){
+  if (!checkOnline("update this entry")) return;
   const item = rental.find(r => String(r.id) === String(id));
   if (!item) {
     showToast(`Error: Rental item not found for ID ${id}`, 'error');
@@ -379,15 +481,21 @@ async function markRentalPaid(id){
   try {
     const { error } = await supabaseClient.from('rental').update({ amount: item.due }).eq('id', id);
     if (error) throw error;
+    saveLocalState('farm_rental', rental);
     showToast('Rental payment marked as paid up!', 'success');
   } catch(e) {
     console.error('Could not mark rental as paid', e);
-    showToast('Could not update payment: ' + e.message);
     item.amount = oldAmount; // rollback
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to update this entry');
+    } else {
+      showToast('Could not update payment: ' + e.message);
+    }
   }
   render();
 }
 async function addMatooke(e){
+  if (!checkOnline("save this entry")) return;
   try {
     const { data, error } = await supabaseClient.from('matooke').insert({
       date: e.date,
@@ -398,29 +506,41 @@ async function addMatooke(e){
     if (error) throw error;
     if (data && data[0]) {
       matooke.push(data[0]);
+      saveLocalState('farm_matooke', matooke);
       showToast('Matooke sale saved!', 'success');
     }
   } catch(err) {
     console.error('Could not save matooke sale', err);
-    showToast('Could not save matooke sale: ' + err.message);
+    if (!navigator.onLine || err.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to save this entry');
+    } else {
+      showToast('Could not save matooke sale: ' + err.message);
+    }
   }
   render();
 }
 async function deleteMatooke(id){
+  if (!checkOnline("remove this entry")) return;
   const oldMatooke = [...matooke];
   matooke = matooke.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('matooke').delete().eq('id', id);
     if (error) throw error;
+    saveLocalState('farm_matooke', matooke);
     showToast('Matooke sale removed.', 'success');
   } catch(e) {
     console.error('Could not delete matooke sale', e);
-    showToast('Could not delete matooke sale: ' + e.message);
     matooke = oldMatooke; // rollback
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to remove this entry');
+    } else {
+      showToast('Could not delete matooke sale: ' + e.message);
+    }
   }
   render();
 }
 async function addCoffee(e){
+  if (!checkOnline("save this entry")) return;
   try {
     const { data, error } = await supabaseClient.from('coffee').insert({
       date: e.date,
@@ -431,29 +551,41 @@ async function addCoffee(e){
     if (error) throw error;
     if (data && data[0]) {
       coffee.push(data[0]);
+      saveLocalState('farm_coffee', coffee);
       showToast('Coffee sale saved!', 'success');
     }
   } catch(err) {
     console.error('Could not save coffee sale', err);
-    showToast('Could not save coffee sale: ' + err.message);
+    if (!navigator.onLine || err.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to save this entry');
+    } else {
+      showToast('Could not save coffee sale: ' + err.message);
+    }
   }
   render();
 }
 async function deleteCoffee(id){
+  if (!checkOnline("remove this entry")) return;
   const oldCoffee = [...coffee];
   coffee = coffee.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('coffee').delete().eq('id', id);
     if (error) throw error;
+    saveLocalState('farm_coffee', coffee);
     showToast('Coffee sale removed.', 'success');
   } catch(e) {
     console.error('Could not delete coffee sale', e);
-    showToast('Could not delete coffee sale: ' + e.message);
     coffee = oldCoffee; // rollback
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to remove this entry');
+    } else {
+      showToast('Could not delete coffee sale: ' + e.message);
+    }
   }
   render();
 }
 async function addExpense(e){
+  if (!checkOnline("save this entry")) return;
   try {
     const { data, error } = await supabaseClient.from('expenses').insert({
       date: e.date,
@@ -465,29 +597,41 @@ async function addExpense(e){
     if (data && data[0]) {
       const added = { ...data[0], category: data[0].category.substring(5) };
       expenses.push(added);
+      saveLocalState('farm_expenses', expenses);
       showToast('Expense saved!', 'success');
     }
   } catch(err) {
     console.error('Could not save expense', err);
-    showToast('Could not save expense: ' + err.message);
+    if (!navigator.onLine || err.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to save this entry');
+    } else {
+      showToast('Could not save expense: ' + err.message);
+    }
   }
   render();
 }
 async function deleteExpense(id){
+  if (!checkOnline("remove this entry")) return;
   const oldExpenses = [...expenses];
   expenses = expenses.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('expenses').delete().eq('id', id);
     if (error) throw error;
+    saveLocalState('farm_expenses', expenses);
     showToast('Expense removed.', 'success');
   } catch(e) {
     console.error('Could not delete expense', e);
-    showToast('Could not delete expense: ' + e.message);
     expenses = oldExpenses; // rollback
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to remove this entry');
+    } else {
+      showToast('Could not delete expense: ' + e.message);
+    }
   }
   render();
 }
 async function addDebtor(e){
+  if (!checkOnline("save this entry")) return;
   try {
     const { data, error } = await supabaseClient.from('debtors').insert({
       date: e.date,
@@ -500,29 +644,41 @@ async function addDebtor(e){
     if (data && data[0]) {
       const added = { ...data[0], notes: data[0].notes.substring(5) };
       debtors.push(added);
+      saveLocalState('farm_debtors', debtors);
       showToast('Debtor saved successfully!', 'success');
     }
   } catch(err) {
     console.error('Could not save debtor', err);
-    showToast('Could not save debtor: ' + err.message);
+    if (!navigator.onLine || err.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to save this entry');
+    } else {
+      showToast('Could not save debtor: ' + err.message);
+    }
   }
   render();
 }
 async function deleteDebtor(id){
+  if (!checkOnline("remove this entry")) return;
   const oldDebtors = [...debtors];
   debtors = debtors.filter(r => String(r.id) !== String(id));
   try {
     const { error } = await supabaseClient.from('debtors').delete().eq('id', id);
     if (error) throw error;
+    saveLocalState('farm_debtors', debtors);
     showToast('Debtor removed.', 'success');
   } catch(e) {
     console.error('Could not delete debtor', e);
-    showToast('Could not delete debtor: ' + e.message);
     debtors = oldDebtors; // rollback
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to remove this entry');
+    } else {
+      showToast('Could not delete debtor: ' + e.message);
+    }
   }
   render();
 }
 async function markDebtorPaid(id){
+  if (!checkOnline("update this entry")) return;
   const item = debtors.find(r => String(r.id) === String(id));
   if (!item) {
     showToast(`Error: Debtor not found for ID ${id}`, 'error');
@@ -533,11 +689,16 @@ async function markDebtorPaid(id){
   try {
     const { error } = await supabaseClient.from('debtors').update({ status: 'paid' }).eq('id', id);
     if (error) throw error;
+    saveLocalState('farm_debtors', debtors);
     showToast('Debtor marked as paid up!', 'success');
   } catch(e) {
     console.error('Could not mark debtor as paid', e);
-    showToast('Could not update debtor: ' + e.message);
     item.status = oldStatus; // rollback
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      showToast('No internet connection — please connect to update this entry');
+    } else {
+      showToast('Could not update debtor: ' + e.message);
+    }
   }
   render();
 }
