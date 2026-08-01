@@ -2,9 +2,6 @@ const CACHE_NAME = "farm-tracker-cache-v1";
 const ASSETS = [
   "./index.html",
   "./manifest.json",
-  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
 ];
@@ -14,7 +11,13 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log("[Service Worker] Pre-caching static assets");
-      return cache.addAll(ASSETS);
+      return Promise.all(
+        ASSETS.map((asset) => {
+          return cache.add(asset).catch((err) => {
+            console.error(`[Service Worker] Failed to cache asset: ${asset}`, err);
+          });
+        })
+      );
     })
   );
   self.skipWaiting();
